@@ -1,4 +1,40 @@
-for i in {0000..9999}; do
-  echo -ne "\rZkouším kód: $i"
-  echo $i | nc -w 0.01 192.168.1.96 54321
-done
+import socket
+
+HOST = "192.168.1.96"
+PORT = 54321
+
+def recv_all(sock, timeout=0.5):
+    sock.settimeout(timeout)
+    data = b""
+    try:
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    except socket.timeout:
+        pass
+    return data
+
+def try_code(code):
+    s = socket.socket()
+    s.settimeout(3)
+    try:
+        s.connect((HOST, PORT))
+        welcome = recv_all(s, 0.5)
+        print(f"Server posila pri pripojeni: {welcome!r}")
+        s.sendall(f"{code:06d}\n".encode())
+        response = recv_all(s, 0.5)
+        s.close()
+        return response.decode(errors="ignore")
+    except Exception as e:
+        return f"ERR: {e}"
+
+print("=== test 1: kod 123456 ===")
+print(repr(try_code(123456)))
+print()
+print("=== test 2: kod 000000 ===")
+print(repr(try_code(0)))
+print()
+print("=== test 3: kod 999999 ===")
+print(repr(try_code(999999)))
